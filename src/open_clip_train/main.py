@@ -305,7 +305,7 @@ def main(args):
     optimizer = None
     scaler = None
 
-    if args.train_data or args.dataset_type == "synthetic":
+    if args.train_data or args.dataset_type == "custom":
         assert not args.trace, 'Cannot train with traced model'
 
         exclude = lambda n, p: p.ndim < 2 or "bn" in n or "ln" in n or "bias" in n or 'logit_scale' in n
