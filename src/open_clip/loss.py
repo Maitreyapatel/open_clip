@@ -272,7 +272,7 @@ class TripletClipLoss(nn.Module):
         
         total_loss = (
             get_loss(image_features, text_features, negative_text_features) +
-            get_loss(negative_text_features, negative_text_features, text_features)
+            get_loss(negative_image_features, negative_text_features, text_features)
         )
 
         return {"contrastive_loss": total_loss} if output_dict else total_loss
