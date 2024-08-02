@@ -92,6 +92,10 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
         if args.negclip:
             images, texts, neg_texts = batch
             texts = torch.cat((texts, neg_texts), dim=0)
+        elif args.tripletclip:
+            images, texts, neg_images, neg_texts = batch
+            texts = torch.cat((texts, neg_texts), dim=0)
+            images = torch.cat((images, neg_images), dim=0)
         else:
             images, texts = batch
         images = images.to(device=device, dtype=input_dtype, non_blocking=True)

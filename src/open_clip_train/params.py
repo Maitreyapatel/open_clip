@@ -31,6 +31,11 @@ def parse_args(args):
         action="store_true"
     )
     parser.add_argument(
+        "--tripletclip",
+        default=False,
+        action="store_true"
+    )
+    parser.add_argument(
         "--train-data",
         type=str,
         default=None,
