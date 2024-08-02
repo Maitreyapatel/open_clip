@@ -89,7 +89,11 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
         if not args.skip_scheduler:
             scheduler(step)
 
-        images, texts = batch
+        if args.negclip:
+            images, texts, neg_texts = batch
+            texts = torch.cat((texts, neg_texts), dim=0)
+        else:
+            images, texts = batch
         images = images.to(device=device, dtype=input_dtype, non_blocking=True)
         texts = texts.to(device=device, non_blocking=True)
 
@@ -111,6 +115,7 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
 
             backward(total_loss, scaler)
         else:
+            raise
             # First, cache the features without any gradient tracking.
             with torch.no_grad():
                 with autocast():

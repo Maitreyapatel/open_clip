@@ -26,6 +26,11 @@ class ParseKwargs(argparse.Action):
 def parse_args(args):
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--negclip",
+        default=False,
+        action="store_true"
+    )
+    parser.add_argument(
         "--train-data",
         type=str,
         default=None,

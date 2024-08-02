@@ -604,6 +604,87 @@ class LaionData(Dataset):
         image = self.transforms(img.convert("RGB"))
         return image, input_ids#, negative_input_ids
 
+class LaionDataNegative(Dataset):
+    def __init__(self, transform, tokenizer, negtype: str = "llm", train: bool = True) -> None:
+        assert train == True
+        assert negtype in ["negclip", "llm"]
+        
+        data_dir = "/scratch/mpatel57/datasets/cc3m/"
+        self.transforms = transform
+        self.tokenizer = tokenizer
+        self.negtype = negtype
+        self.train = train
+
+        with open(os.path.join(data_dir, "key2url.json")) as h:
+            self.key2url = json.load(h)
+        with open(os.path.join(data_dir, "url2capidx.json")) as h:
+            self.url2capidx = json.load(h)
+        with open(os.path.join(data_dir, "all_captions_ided_dict_allnegatives.json")) as h:
+            self.neg_captions = json.load(h)
+
+        self.dataset = (
+            wds.WebDataset(
+                data_dir + "cc3m/{00000..00331}.tar",
+                resampled=True,
+                handler=wds.ignore_and_continue,
+                nodesplitter=None,
+            )
+            .shuffle(1000)
+            .decode("pilrgb", handler=wds.ignore_and_continue)
+            .rename(image="jpg;png;jpeg;webp", text="txt")
+            .to_tuple("image", "text", "__key__")
+            .with_length(3000000)
+            .with_epoch(3000000)
+        )
+        self.length = len(self.dataset)
+        self.dataset = iter(self.dataset)
+
+
+    def __len__(self):
+        return self.length
+
+    def get_captions(self, data_key):
+        data_index = str(self.url2capidx[str(self.key2url[data_key])])
+        caption = self.neg_captions[data_index]["language-rewrite"]
+        if self.negtype=="llm":
+            return caption, self.neg_captions[data_index]["negative_caption"]
+        elif self.negtype=="negclip":
+            d = self.neg_captions[data_index]["language-rewrite-negative-caption"]
+            types_of_hn = ["relation_aug_caption", "adj_aug_caption", "noun_aug_caption", "verb_aug_caption"]
+            tmp_prompt = []
+            for en_i, thn in enumerate(types_of_hn):
+                if d['valid_caption'][en_i]==1:
+                    tmp_prompt.append(d[thn])
+            return caption, random.choice(tmp_prompt)
+        else:
+            raise ValueError
+
+    def __getitem__(self, index):
+        data = next(self.dataset)
+        img, _, data_key = data[0], data[1], data[2]
+        negative_image = None
+
+        try:
+            caption, negative_caption = self.get_captions(data_key)
+        except:
+            return self.__getitem__(random.randint(0, self.length-1))
+        
+        # input_ids = {
+        #     k: v[0]
+        #     for k, v in self.tokenizer(
+        #         caption, padding="max_length", truncation=True, return_tensors="pt"
+        #     ).items()
+        # }
+        # negative_input_ids = {
+        #     k: v[0]
+        #     for k, v in self.tokenizer(
+        #         negative_caption, padding="max_length", truncation=True, return_tensors="pt", max_length=77
+        #     ).items()
+        # }
+        input_ids = self.tokenizer(caption)[0]
+        negative_input_ids = self.tokenizer(negative_caption)[0]
+        image = self.transforms(img.convert("RGB"))
+        return image, input_ids, negative_input_ids
 
 
 def custom_dataset(args, preprocess_fn, is_train, epoch=0, tokenizer=None):
@@ -628,10 +709,35 @@ def custom_dataset(args, preprocess_fn, is_train, epoch=0, tokenizer=None):
 
     return DataInfo(dataloader, sampler)
 
+def custom_negative_dataset(args, preprocess_fn, is_train, epoch=0, tokenizer=None):
+    image_size = preprocess_fn.transforms[0].size
+    dataset = LaionDataNegative(
+        transform=preprocess_fn, tokenizer=tokenizer)
+    num_samples = len(dataset)
+    sampler = DistributedSampler(dataset) if args.distributed and is_train else None
+    shuffle = is_train and sampler is None
 
-def get_dataset_fn(data_path, dataset_type):
+    dataloader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=shuffle,
+        num_workers=args.workers,
+        pin_memory=True,
+        # sampler=sampler,
+        drop_last=is_train,
+    )
+    dataloader.num_samples = num_samples
+    dataloader.num_batches = len(dataloader)
+
+    return DataInfo(dataloader, sampler)
+
+
+def get_dataset_fn(data_path, dataset_type, args=None):
     if dataset_type == "custom":
-        return custom_dataset
+        if args.negclip:
+            return custom_negative_dataset
+        else:
+            return custom_dataset
     elif dataset_type == "webdataset":
         return get_wds_dataset
     elif dataset_type == "csv":
@@ -656,7 +762,7 @@ def get_data(args, preprocess_fns, epoch=0, tokenizer=None):
     data = {}
 
     if args.dataset_type=="custom":
-        data["train"] = get_dataset_fn(args.train_data, args.dataset_type)(
+        data["train"] = get_dataset_fn(args.train_data, args.dataset_type, args)(
             args, preprocess_train, is_train=True, epoch=epoch, tokenizer=tokenizer)
         if args.val_data:
             data["val"] = get_dataset_fn(args.val_data, args.dataset_type)(
